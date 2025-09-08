@@ -1,0 +1,43 @@
+services:
+  service-a:
+    build: ./service-a
+    ports:
+    - "8080:8080"
+    networks:
+    - go-net
+    environment:
+    - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+    - SERVICE_B_URL=http://service-b:8081
+
+  service-b:
+    build: ./service-b
+    ports:
+    - "8081:8081"
+    networks:
+    - go-net
+    environment:
+    - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+    - VIA_CEP_URL=https://viacep.com.br/ws/
+    - WEATHER_API_URL=https://api.weatherapi.com/v1/current.json
+    - WEATHER_API_KEY=SUA_CHAVE_AQUI # Substitua pela sua chave da WeatherAPI
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.99.0
+    command: ["--config=/etc/otel-collector-config.yml"]
+    volumes:
+    - ./otel-collector-config.yml:/etc/otel-collector-config.yml
+    ports:
+    - "4317:4317" # Porta OTLP/gRPC
+    - "4318:4318" # Porta OTLP/HTTP
+    networks:
+    - go-net
+
+  zipkin:
+    image: openzipkin/zipkin:2
+    ports:
+    - "9411:9411"
+    networks:
+    - go-net
+
+networks:
+  go-net:
