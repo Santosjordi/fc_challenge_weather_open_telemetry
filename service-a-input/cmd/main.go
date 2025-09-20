@@ -15,7 +15,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -28,9 +28,15 @@ type ZipCode struct {
 
 // initTracerProvider configura o provedor de tracer para enviar traces para o OTLP.
 func initTracerProvider() (*sdktrace.TracerProvider, error) {
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+
 	// Cria um novo cliente exportador OTLP que se conecta ao OTEL Collector
 	ctx := context.Background()
-	exporter, err := otlptracegrpc.New(ctx)
+	exporter, err := otlptracehttp.New(
+		ctx,
+		otlptracehttp.WithEndpoint(endpoint),
+		otlptracehttp.WithInsecure(), // needed if collector is not using TLS
+	)
 	if err != nil {
 		return nil, fmt.Errorf("falha ao criar o exporter OTLP: %w", err)
 	}
