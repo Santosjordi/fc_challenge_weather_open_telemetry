@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"context"
@@ -8,7 +8,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
+	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -37,7 +39,7 @@ func initTracerProvider() (*sdktrace.TracerProvider, error) {
 	res, err := resource.New(
 		ctx,
 		resource.WithAttributes(
-			semconv.ServiceName("service-a"),
+			semconv.ServiceName("service-a-input"),
 			semconv.ServiceVersion("1.0.0"),
 		),
 	)
@@ -139,13 +141,19 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
 	// Configura o provedor de trace e se certifica de que ele seja desligado corretamente
 	tp, err := initTracerProvider()
 	if err != nil {
 		log.Fatalf("falha ao configurar o TracerProvider: %v", err)
 	}
 	defer func() {
-		if err := tp.Shutdown(context.Background()); err != nil {
+		if err := tp.Shutdown(ctx); err != nil {
 			log.Fatalf("falha ao desligar o TracerProvider: %v", err)
 		}
 	}()
@@ -154,10 +162,21 @@ func main() {
 	mux.HandleFunc("/zipcode", handler)
 
 	// O otelhttp.NewHandler lida com a criação de spans para as requisições HTTP de entrada
-	handler := otelhttp.NewHandler(mux, "service-a")
+	handler := otelhttp.NewHandler(mux, "service-a-input")
 
 	log.Println("Serviço A está rodando na porta :8080...")
 	if err := http.ListenAndServe(":8080", handler); err != nil {
 		log.Fatalf("falha ao rodar o servidor: %v", err)
 	}
+
+	select {
+	case <-sigCh:
+		log.Println("Shutting down gracefully...")
+	case <-ctx.Done():
+		log.Println("Shutting down due to other reason...")
+	}
+
+	// Timeout context for gracefull shutdown
+	_, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
 }
