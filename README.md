@@ -22,7 +22,7 @@ The services communicate via HTTP, and telemetry is exported to the **OpenTeleme
 
 | Variable                      | Description                                        | Required |
 | ----------------------------- | -------------------------------------------------- | -------- |
-| `WEATHER_API_KEY`             | API key for the external weather API               | ✅ Yes    |
+| `WEATHER_API_KEY`             | API key for the external weather API               | Yes      |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional, defaults to `http://otel-collector:4318` | No       |
 
 > **Note:** This is the **only environment variable you must set** (`WEATHER_API_KEY`). All ports, service URLs, and telemetry configuration are pre-configured in `docker-compose.yml`.
