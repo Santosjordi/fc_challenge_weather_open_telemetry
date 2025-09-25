@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -110,9 +111,16 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// Cria um span para a chamada HTTP para o Serviço B
 	_, callSpan := otel.Tracer("service-a").Start(ctx, "call-service-b")
 
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/%s", serviceBURL, zipCode.CEP), nil)
+	// Re-encode the zipcode to create a new request body for service-b
+	reqBody, err := json.Marshal(zipCode)
 	if err != nil {
-		callSpan.RecordError(err)
+		http.Error(w, "falha ao criar o corpo da requisição para o Serviço B", http.StatusInternalServerError)
+		return
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", serviceBURL, bytes.NewReader(reqBody))
+	if err != nil {
+		callSpan.RecordError(err) // Record error on the span
 		callSpan.End()
 		http.Error(w, "falha ao criar a requisição para o Serviço B", http.StatusInternalServerError)
 		return

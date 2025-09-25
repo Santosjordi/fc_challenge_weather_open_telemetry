@@ -25,8 +25,8 @@ import (
 )
 
 type ViaCEPResponse struct {
-	Localidade string `json:"localidade"`
-	Erro       bool   `json:"erro"`
+	Localidade string `json:"localidade,omitempty"`
+	Erro       string `json:"erro,omitempty"`
 }
 
 type WeatherAPIResponse struct {
@@ -94,9 +94,22 @@ func (a *app) handler(w http.ResponseWriter, r *http.Request) {
 	ctx, span := tracer.Start(ctx, "orchestration-handler")
 	defer span.End()
 
-	// Get the ZIP code from the URL path
-	cep := r.URL.Path[1:]
+	if r.Method != http.MethodPost {
+		http.Error(w, "only POST method is allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
+	var payload struct {
+		CEP string `json:"cep"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	cep := payload.CEP
 	log.Printf("Received request for CEP: %s", cep)
 
 	// Validate ZIP code format
@@ -107,11 +120,9 @@ func (a *app) handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch city from ViaCEP
-	viaCepURL := fmt.Sprintf("https://viacep.com.br/ws/%s/json/", cep)
-
-	// Create a span for the ViaCEP API call
-	ctx, viaCepSpan := tracer.Start(ctx, "call-viacep-api")
-	req, _ := http.NewRequestWithContext(ctx, "GET", viaCepURL, nil)
+	ctx, viaCepSpan := tracer.Start(ctx, "call-viacep-api") // Create a span for the ViaCEP API call
+	url := fmt.Sprintf(viaCepURL, cep)
+	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
 	resp, err := http.DefaultClient.Do(req)
 	viaCepSpan.End()
 
@@ -122,6 +133,12 @@ func (a *app) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("ViaCEP API returned non-200 status for CEP %s: %s", cep, resp.Status)
+		http.Error(w, "can not find zipcode", http.StatusNotFound)
+		return
+	}
+
 	body, _ := io.ReadAll(resp.Body)
 	var viaCepData ViaCEPResponse
 	if err := json.Unmarshal(body, &viaCepData); err != nil {
@@ -129,7 +146,7 @@ func (a *app) handler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "error unmarshalling ViaCEP response", http.StatusInternalServerError)
 		return
 	}
-	if viaCepData.Erro || viaCepData.Localidade == "" {
+	if viaCepData.Erro == "true" || viaCepData.Localidade == "" {
 		log.Printf("CEP not found or missing localidade: %s", cep)
 		http.Error(w, "can not find zipcode", http.StatusNotFound)
 		return
@@ -137,12 +154,9 @@ func (a *app) handler(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch temperature from WeatherAPI
 	// URL encode the city name to handle spaces and special characters
-	escapedCity := url.QueryEscape(viaCepData.Localidade)
-	weatherAPIKey := a.cfg.WeatherAPIKey
-	weatherURL := fmt.Sprintf("http://api.weatherapi.com/v1/current.json?key=%s&q=%s", weatherAPIKey, escapedCity)
+	weatherURL := getWeatherURL(a.cfg.WeatherAPIKey, viaCepData.Localidade)
 
-	// Create a span for the WeatherAPI call
-	ctx, weatherSpan := tracer.Start(ctx, "call-weather-api")
+	ctx, weatherSpan := tracer.Start(ctx, "call-weather-api") // Create a span for the WeatherAPI call
 	req, _ = http.NewRequestWithContext(ctx, "GET", weatherURL, nil)
 	resp, err = http.DefaultClient.Do(req)
 	weatherSpan.End()
@@ -245,4 +259,14 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("server forced to shutdown: %v", err)
 	}
+}
+
+// To make the handler testable, we make the URLs configurable.
+var (
+	viaCepURL = "https://viacep.com.br/ws/%s/json/"
+)
+
+var getWeatherURL = func(apiKey, city string) string {
+	escapedCity := url.QueryEscape(city)
+	return fmt.Sprintf("http://api.weatherapi.com/v1/current.json?key=%s&q=%s", apiKey, escapedCity)
 }
